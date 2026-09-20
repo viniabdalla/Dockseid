@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.silkvain.dockseid",
   "name": "Dockseid",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "author": "Silkvain",
   "license": "MIT",
-  "description": "A macOS-style pill dock for Omarchy: shows running and pinned apps grouped by instance count, and themes itself from the active Omarchy theme with an optional independent override.",
+  "description": "A macOS-style pill dock for Omarchy: pinned and running apps grouped per app, glass and blur effects, icon magnification, and a look that follows your Omarchy theme with per-colour overrides.",
   "kinds": ["panel"],
   "keepLoaded": true,
   "entryPoints": { "panel": "Dock.qml" }

@@ -1,10 +1,10 @@
 import QtQuick
 import qs.Commons
 
-// One dock slot: icon image, hover highlight, running dot, and an instance
-// count badge. All popups (hover preview, context menu) are owned by Dock.qml
-// and positioned against this item, so only one popup surface exists at a
-// time no matter how many apps are pinned/running.
+// One dock slot: icon image, hover highlight, and running dot. All popups
+// (hover preview, context menu) are owned by Dock.qml and positioned against
+// this item, so only one popup surface exists at a time no matter how many
+// apps are pinned/running.
 Item {
   id: root
 
@@ -12,9 +12,23 @@ Item {
   property color foreground: Color.foreground
   property color accent: Color.accent
   property real sizeScale: 1.0
-  property real iconSize: Style.space(42) * sizeScale
-  property real slotSize: Style.space(54) * sizeScale
+  // Whole pixels only: the icon is requested from the image provider at exactly
+  // the size it's drawn, so it maps 1:1 to screen pixels instead of being
+  // stretched by a fractional factor (the cause of the blur). The icon's size
+  // takes the same parity as the slot so centring it never lands on a half pixel.
+  // DockSurface.slotSize must round the same way.
+  property int slotSize: Math.round(Style.space(54) * sizeScale)
+  property int iconSize: {
+    var s = Math.round(Style.space(42) * sizeScale)
+    return ((root.slotSize - s) % 2 === 0) ? s : s + 1
+  }
   property bool menuOpen: false
+  // Fisheye magnification, driven by DockSurface. Applied to the icon image
+  // only (not the hover highlight or dot), so it stays inside the dock's
+  // bounds; renderScale is the largest magnification, so the icon is decoded
+  // at a size that stays sharp when scaled up.
+  property real magnification: 1.0
+  property real renderScale: 1.0
 
   signal hoverEntered()
   signal hoverExited()
@@ -34,7 +48,6 @@ Item {
   z: mouseArea.dragging ? 10 : 0
 
   readonly property bool running: modelData.running === true
-  readonly property int count: modelData.count || 0
   readonly property bool dragging: mouseArea.dragging
   readonly property bool hot: mouseArea.containsMouse || root.menuOpen
 
@@ -55,11 +68,16 @@ Item {
     height: root.iconSize
     fillMode: Image.PreserveAspectFit
     asynchronous: true
-    sourceSize.width: width * Screen.devicePixelRatio
-    sourceSize.height: height * Screen.devicePixelRatio
+    smooth: true
+    mipmap: root.renderScale > 1   // only downscaled (magnification) needs it
+    sourceSize.width: width * Screen.devicePixelRatio * root.renderScale
+    sourceSize.height: height * Screen.devicePixelRatio * root.renderScale
     source: root.modelData.iconSource || ""
-    scale: mouseArea.dragging ? 1.1 : (mouseArea.pressed ? 0.92 : 1.0)
-    Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+    // The press/drag feedback animates; magnification does not, because it
+    // follows the pointer every event and an animation would restart each time.
+    property real pressScale: mouseArea.dragging ? 1.1 : (mouseArea.pressed ? 0.92 : 1.0)
+    Behavior on pressScale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+    scale: pressScale * root.magnification
   }
 
   // macOS-style running indicator.
@@ -72,31 +90,6 @@ Item {
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
     anchors.bottomMargin: Style.space(2)
-  }
-
-  // Instance-count badge, Windows-taskbar-grouping style.
-  Rectangle {
-    id: badge
-    visible: root.count > 1
-    width: Math.max(Style.space(16) * root.sizeScale, badgeLabel.implicitWidth + Style.space(6))
-    height: Style.space(16) * root.sizeScale
-    radius: height / 2
-    color: root.accent
-    anchors.top: parent.top
-    anchors.right: parent.right
-    anchors.topMargin: Style.space(2)
-    anchors.rightMargin: Style.space(2)
-
-    Text {
-      id: badgeLabel
-      anchors.centerIn: parent
-      textFormat: Text.PlainText
-      text: root.count > 9 ? "9+" : String(root.count)
-      color: Color.background
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      font.bold: true
-    }
   }
 
   MouseArea {

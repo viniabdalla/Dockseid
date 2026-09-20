@@ -6,6 +6,10 @@ Item {
   id: root
 
   property string glyph: "+"
+  property string fontFamily: Style.font.family
+  property real glyphScale: 1.0   // multiplies the glyph's font size
+  property color glyphColor: Color.foreground
+  property real glyphOpacity: 0.75
   property real sizeScale: 1.0
   property real diameter: Style.space(34) * sizeScale
 
@@ -25,10 +29,10 @@ Item {
     anchors.centerIn: parent
     textFormat: Text.PlainText
     text: root.glyph
-    color: Color.foreground
-    font.family: Style.font.family
-    font.pixelSize: Style.font.heading * root.sizeScale
-    opacity: 0.75
+    color: root.glyphColor
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.heading * root.sizeScale * root.glyphScale
+    opacity: root.glyphOpacity
   }
 
   MouseArea {

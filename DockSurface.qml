@@ -1,9 +1,13 @@
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Layouts
+import QtQuick.Shapes
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
+import "DockModel.js" as DockModel
 
 // Everything needed to render the dock on one screen: the always-present
 // hover trigger strip (autohide mode only), the pill itself, and the three
@@ -22,6 +26,12 @@ Item {
   readonly property bool vertical: position === "left" || position === "right"
   readonly property bool alwaysVisible: settings.visibility === "always"
 
+  // Glass replaces the opacity/blur/outline settings with a fixed frosted-glass
+  // look (see Dock.qml effectiveOpacity for the tint).
+  readonly property bool glass: settings.glass
+  readonly property real effectiveBlur: surface.glass ? 0.16 : settings.blur   // ~10px of the 64px max
+  readonly property bool outlineOn: settings.borderEnabled && !surface.glass
+
   // -------------------------------------------------------- fullscreen
   // Whether any window fullscreened on THIS screen currently overrides the
   // dock. Tracks the generic Wayland toplevel fullscreen flag (not a
@@ -31,6 +41,17 @@ Item {
   Connections {
     target: ToplevelManager.toplevels
     function onValuesChanged() { surface.toplevelRevision++ }
+  }
+  // Fullscreen and screen membership change on an existing toplevel without
+  // the list itself changing, so each window needs its own listener.
+  Instantiator {
+    model: ToplevelManager.toplevels
+    delegate: Connections {
+      required property var modelData
+      target: modelData
+      function onFullscreenChanged() { surface.toplevelRevision++ }
+      function onScreensChanged() { surface.toplevelRevision++ }
+    }
   }
   readonly property bool fullscreenActive: {
     var _rev = surface.toplevelRevision // establishes a dependency so add/remove windows re-evaluate this
@@ -47,9 +68,18 @@ Item {
   }
   readonly property bool fullscreenOverride: settings.showInFullscreen && surface.fullscreenActive
 
-  // Whether THIS screen currently has no open windows at all. Reuses the
-  // same toplevelRevision dependency as fullscreenActive above.
+  // Whether the workspace currently showing on THIS screen has no windows.
+  // Hyprland reports each monitor's active workspace and that workspace's
+  // windows, so switching to an empty workspace brings the dock up and switching
+  // to one with windows lets it hide again. Windows on other workspaces don't
+  // count. If Hyprland's data isn't available it falls back to the old
+  // generic-Wayland rule: no window at all on this screen (which reuses the same
+  // toplevelRevision dependency as fullscreenActive above).
+  readonly property var hyprMonitor: Hyprland.monitorFor(surface.screen)
+  readonly property var hyprWorkspace: surface.hyprMonitor ? surface.hyprMonitor.activeWorkspace : null
   readonly property bool screenEmpty: {
+    var ws = surface.hyprWorkspace
+    if (ws && ws.toplevels) return ws.toplevels.values.length === 0
     var _rev = surface.toplevelRevision
     var list = ToplevelManager.toplevels.values
     for (var i = 0; i < list.length; i++) {
@@ -119,7 +149,7 @@ Item {
   // content to make room for a thicker border. Padding the pill's own size
   // by the border width instead keeps the icons/controls at their natural
   // size and grows the dock outward around them.
-  readonly property real borderPad: settings.borderEnabled ? settings.borderWidth : 0
+  readonly property real borderPad: surface.outlineOn ? settings.borderWidth : 0
   readonly property real outerThickness: surface.thickness + surface.borderPad * 2
 
   // -------------------------------------------------------- reveal/hover
@@ -168,7 +198,7 @@ Item {
   }
 
   function showHover(iconItem, item) {
-    if (surface.openPopupKind === "menu" || surface.openPopupKind === "settings") return
+    if (surface.openPopupKind === "menu" || surface.openPopupKind === "settings" || surface.dragActive) return
     hoverHideTimer.stop()
     surface.openPopupKind = "hover"
     surface.openPopupItem = item
@@ -211,6 +241,18 @@ Item {
     contextMenu.visible = true
   }
 
+  // Pushes the three themeable colors and their System/Custom switches into the
+  // settings popup (a logo with no color of its own shows the current accent).
+  function syncThemeToPopup() {
+    var st = controller.settings
+    settingsPopup.useCustomBackground = st.useCustomBackground
+    settingsPopup.useCustomBorder = st.useCustomBorder
+    settingsPopup.useCustomLogo = st.useCustomLogo
+    settingsPopup.customBackground = st.customBackground
+    settingsPopup.customBorder = st.customBorder
+    settingsPopup.customLogo = st.customLogo !== "" ? st.customLogo : String(controller.dockAccent)
+  }
+
   function showSettings() {
     surface.closePopups()
     surface.openPopupKind = "settings"
@@ -220,9 +262,10 @@ Item {
     settingsPopup.anchorItem = pill
     settingsPopup.shape = surface.settings.shape
     settingsPopup.opacityValue = surface.settings.opacity
-    settingsPopup.themeMode = surface.settings.themeMode
-    settingsPopup.customBackground = surface.settings.customBackground
-    settingsPopup.customAccent = surface.settings.customAccent
+    settingsPopup.blurValue = surface.settings.blur
+    settingsPopup.glass = surface.settings.glass
+    settingsPopup.magnify = surface.settings.magnify
+    surface.syncThemeToPopup()
     settingsPopup.monitor = surface.settings.monitor
     settingsPopup.visibilityMode = surface.settings.visibility
     settingsPopup.size = surface.settings.size
@@ -240,8 +283,25 @@ Item {
   // --------------------------------------------------------- drag reorder
   // Per-icon footprint along the dock's primary axis. Must track
   // DockAppIcon's own slotSize formula (Style.space(54) * sizeScale).
-  readonly property real iconSpacing: Style.space(4)
-  readonly property real iconSlot: Style.space(54) * surface.settings.size + surface.iconSpacing
+  readonly property real iconSpacing: Math.round(Style.space(4))
+  readonly property real slotSize: Math.round(Style.space(54) * surface.settings.size)   // same rounding as DockAppIcon.slotSize
+  readonly property real iconSlot: surface.slotSize + surface.iconSpacing
+
+  // ------------------------------------------------- icon magnification
+  // Fisheye: icons under the cursor grow (up to what fits inside the dock's
+  // own thickness) and neighbours spread to make room; the strip keeps its
+  // resting length, so the dock never resizes under the cursor. Only the
+  // strength is animated (in/out on hover); the pointer drives the rest
+  // directly, so per-icon animations are switched off while it's active.
+  readonly property bool magnifyOn: settings.magnify && !surface.dragActive
+  readonly property real maxMag: Math.max(1, Math.min(1.5, (surface.thickness - Style.space(3)) / (Style.space(42) * settings.size)))
+  property real magPointer: 0
+  property real magStrength: (surface.magnifyOn && iconHover.hovered) ? 1 : 0
+  Behavior on magStrength { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+  readonly property var magLayout: surface.magStrength > 0
+    ? DockModel.magnifyLayout(controller.dockItems.length, surface.iconSlot, surface.slotSize,
+        surface.magPointer, 1 + (surface.maxMag - 1) * surface.magStrength, 2.4)
+    : null
 
   property bool dragActive: false
   property string dragKey: ""
@@ -358,9 +418,15 @@ Item {
       // what the active theme's own popup border happens to specify, so the
       // outline stays even on every corner and the slider below actually
       // has visible effect against any theme.
+      //
+      // surfaceSpec only treats dockBorder as a fallback for themes that don't
+      // define a popup border, so in custom mode the picked color is applied
+      // directly (flat) — otherwise the theme's own border silently wins.
       borderSpec: Border.withWidth(
-        Border.surfaceSpec("popups", "border", controller.dockBorder, 1),
-        surface.settings.borderEnabled ? surface.settings.borderWidth : 0)
+        surface.settings.useCustomBorder
+          ? Border.flat(controller.dockBorder, 1)
+          : Border.surfaceSpec("popups", "border", controller.dockBorder, 1),
+        surface.outlineOn ? surface.settings.borderWidth : 0)
       radius: controller.dockRadius
       implicitWidth: surface.vertical ? surface.outerThickness : (contentLayout.implicitWidth + Style.space(16) + surface.borderPad * 2)
       implicitHeight: surface.vertical ? (contentLayout.implicitHeight + Style.space(16) + surface.borderPad * 2) : surface.outerThickness
@@ -373,13 +439,153 @@ Item {
       x: !surface.vertical ? 0 : (surface.position === "left" ? -surface.slideAmount : surface.slideAmount)
       y: surface.vertical ? 0 : (surface.position === "top" ? -surface.slideAmount : surface.slideAmount)
 
+      // Blurred wallpaper behind the pill's tint (negative z draws behind the
+      // pill's own fill and outline). A screen-sized copy of the wallpaper —
+      // fitted the same way the shell fits it (aspect-crop) — is sampled at the
+      // pill's on-screen rect and blurred, then masked to the pill's shape. The
+      // region is padded by `bleed` so the blur never reads past its own edge,
+      // and a slightly enlarged copy sits behind the exact one so the padding
+      // beyond the screen edge (dock hugging the bottom) isn't transparent.
+      Loader {
+        id: blurBackdrop
+        z: -1
+        anchors.fill: parent
+        active: surface.effectiveBlur > 0 && controller.wallpaperUrl !== ""
+
+        sourceComponent: Item {
+          id: backdrop
+          readonly property real bleed: 64
+          readonly property real screenX: surface.dockOriginX + pill.x
+          readonly property real screenY: surface.dockOriginY + pill.y
+
+          Item {
+            id: wallpaperLayer
+            width: surface.screen.width
+            height: surface.screen.height
+            Image {
+              x: -backdrop.bleed
+              y: -backdrop.bleed
+              width: wallpaperLayer.width + backdrop.bleed * 2
+              height: wallpaperLayer.height + backdrop.bleed * 2
+              source: controller.wallpaperUrl
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+            }
+            Image {
+              anchors.fill: parent
+              source: controller.wallpaperUrl
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+            }
+          }
+
+          ShaderEffectSource {
+            id: wallpaperCrop
+            sourceItem: wallpaperLayer
+            hideSource: true
+            visible: false
+            sourceRect: Qt.rect(backdrop.screenX - backdrop.bleed, backdrop.screenY - backdrop.bleed,
+              pill.width + backdrop.bleed * 2, pill.height + backdrop.bleed * 2)
+          }
+
+          Item {
+            id: backdropMask
+            width: pill.width + backdrop.bleed * 2
+            height: pill.height + backdrop.bleed * 2
+            layer.enabled: true
+            visible: false
+            Rectangle {
+              x: backdrop.bleed
+              y: backdrop.bleed
+              width: pill.width
+              height: pill.height
+              radius: pill.radius
+              color: "black"
+            }
+          }
+
+          MultiEffect {
+            x: -backdrop.bleed
+            y: -backdrop.bleed
+            width: pill.width + backdrop.bleed * 2
+            height: pill.height + backdrop.bleed * 2
+            source: wallpaperCrop
+            autoPaddingEnabled: false
+            blurEnabled: true
+            blurMax: 64
+            blur: surface.effectiveBlur
+            saturation: surface.glass ? 0.3 : 0
+            brightness: surface.glass ? 0.05 : 0
+            contrast: surface.glass ? -0.05 : 0
+            maskEnabled: true
+            maskSource: backdropMask
+          }
+        }
+      }
+
+      // Glass highlights: no outline at all — the pill's edge comes only from
+      // its light tint over the blurred wallpaper. Broad, soft patches of light
+      // (a sheen fading down from the top, a brighter pool at the top-right, a
+      // fainter one at the bottom-left) are laid over the blur, the way glass
+      // catches light, instead of a drawn edge line. Sits above the tint,
+      // below the icons.
+      Shape {
+        id: glassEdge
+        visible: surface.glass
+        anchors.fill: parent
+        layer.enabled: true
+        layer.samples: 4
+
+        readonly property real w: pill.width
+        readonly property real h: pill.height
+        readonly property string outline: DockModel.bubblePath(0, 0, w, h, pill.radius, 0, 0, "")
+
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: LinearGradient {
+            x1: 0; y1: 0; x2: 0; y2: glassEdge.h
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.09) }
+            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.0) }
+            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.03) }
+          }
+          PathSvg { path: glassEdge.outline }
+        }
+
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: glassEdge.w * 0.86; centerY: 0
+            centerRadius: glassEdge.w * 0.30
+            focalX: centerX; focalY: centerY
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.16) }
+            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.0) }
+          }
+          PathSvg { path: glassEdge.outline }
+        }
+
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: glassEdge.w * 0.12; centerY: glassEdge.h
+            centerRadius: glassEdge.w * 0.24
+            focalX: centerX; focalY: centerY
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.09) }
+            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.0) }
+          }
+          PathSvg { path: glassEdge.outline }
+        }
+      }
+
       HoverHandler {
         onHoveredChanged: surface.pillHovered = hovered
       }
 
       GridLayout {
         id: contentLayout
-        anchors.centerIn: parent
+        // Centred by hand and rounded, so the icons inside land on whole pixels
+        // (anchors.centerIn can leave a half-pixel offset).
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
         columns: surface.vertical ? 1 : -1
         rows: surface.vertical ? -1 : 1
         rowSpacing: Style.space(4)
@@ -391,7 +597,14 @@ Item {
         // (its own tab) instead of a permanent second icon here.
         DockControlButton {
           id: settingsButton
-          glyph: "⚙"
+          // Omarchy's own logo glyph (the same one its bar's menu button uses).
+          glyph: "\ue900"
+          fontFamily: "omarchy"
+          // Sized to match the app icons next to it.
+          glyphScale: 2.0
+          glyphColor: controller.dockLogo   // system accent, or the custom Logo color in Custom mode
+          glyphOpacity: 1
+          diameter: Math.round(Style.space(42) * surface.settings.size)
           sizeScale: surface.settings.size
           Layout.alignment: Qt.AlignCenter
           onClicked: surface.showSettings()
@@ -417,6 +630,11 @@ Item {
           implicitHeight: surface.vertical
             ? Math.max(0, iconStrip.itemCount * surface.iconSlot - surface.iconSpacing) : surface.thickness
 
+          HoverHandler {
+            id: iconHover
+            onPointChanged: if (hovered) surface.magPointer = surface.vertical ? point.position.y : point.position.x
+          }
+
           Repeater {
             model: controller.dockItems
 
@@ -432,14 +650,18 @@ Item {
               readonly property bool isDragging: surface.dragActive && surface.dragKey === modelData.key
               readonly property int visualIndex: surface.dragActive
                 ? surface.dragWorkingOrder.indexOf(modelData.key) : index
-              readonly property real primaryPos: isDragging ? surface.dragLiveOffset : visualIndex * surface.iconSlot
-              readonly property real crossPos: (surface.thickness - slotSize) / 2
+              readonly property real primaryPos: isDragging ? surface.dragLiveOffset
+                : (surface.magLayout && surface.magLayout.origins[index] !== undefined
+                    ? surface.magLayout.origins[index] : visualIndex * surface.iconSlot)
+              magnification: (surface.magLayout && surface.magLayout.scales[index] !== undefined) ? surface.magLayout.scales[index] : 1
+              renderScale: surface.settings.magnify ? surface.maxMag : 1
+              readonly property real crossPos: Math.round((surface.thickness - slotSize) / 2)
 
               x: surface.vertical ? crossPos : primaryPos
               y: surface.vertical ? primaryPos : crossPos
 
-              Behavior on x { enabled: !iconDelegate.isDragging; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-              Behavior on y { enabled: !iconDelegate.isDragging; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+              Behavior on x { enabled: !iconDelegate.isDragging && surface.magStrength === 0; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+              Behavior on y { enabled: !iconDelegate.isDragging && surface.magStrength === 0; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
               onHoverEntered: surface.showHover(iconDelegate, modelData)
               onHoverExited: surface.scheduleHideHover()
@@ -524,11 +746,13 @@ Item {
     onAppPicked: function(id) { controller.pinApp(id) }
     onShapePicked: function(v) { controller.setShape(v); settingsPopup.shape = v }
     onOpacityPicked: function(v) { controller.setOpacity(v); settingsPopup.opacityValue = v }
-    onThemeModePicked: function(v) { controller.setThemeMode(v); settingsPopup.themeMode = v }
+    onMagnifyPicked: function(v) { controller.setMagnify(v); settingsPopup.magnify = v }
+    onGlassPicked: function(v) { controller.setGlass(v); settingsPopup.glass = v }
+    onBlurPicked: function(v) { controller.setBlur(v); settingsPopup.blurValue = v }
+    onCustomEnabledPicked: function(kind, on) { controller.setUseCustom(kind, on); surface.syncThemeToPopup() }
     onCustomColorPicked: function(kind, hex) {
       controller.setCustomColor(kind, hex)
-      if (kind === "background") settingsPopup.customBackground = controller.settings.customBackground
-      else settingsPopup.customAccent = controller.settings.customAccent
+      surface.syncThemeToPopup()
     }
     // Position flips dock orientation (horizontal/vertical) and Monitor
     // relocates to a different screen entirely — both a much bigger

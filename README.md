@@ -1,71 +1,102 @@
 # Dockseid
 
-A persistent, macOS-style pill dock for [Omarchy](https://omarchy.org). Shows
-your running and pinned apps, groups every window of an app under one icon,
-and themes itself from your active Omarchy theme by default.
+![Dockseid V2](preview.png)
 
-## Features
+A macOS-style pill dock for [Omarchy](https://omarchy.org). It shows your running
+and pinned apps, groups every window of an app under one icon, and follows your
+Omarchy theme, with glass and blur effects, icon magnification and per-colour
+overrides if you want the dock to look different from the rest of the desktop.
 
-- **Running apps** — every open application gets a dock icon automatically,
-  sourced from Hyprland's toplevel list.
-- **Pin apps** — right-click any icon to keep it in the dock even after you
-  quit it, or open the gear button's **Add App** tab to search and pin an
-  app you haven't opened yet.
-- **Reorder icons** — drag any icon (pinned or currently running) to
-  rearrange the dock; the order is remembered.
-- **Window grouping** — every window of an app stacks on that app's single
-  icon. A small badge shows the count when there's more than one; hovering
-  lists each window's title so you can jump straight to one (click a row to
-  activate it), the same grouping behavior Windows' taskbar uses. Clicking
-  the icon itself cycles through the group one window at a time.
-- **Theme-aware** — the dock's colors follow `qs.Commons.Color`, so it
-  re-themes itself automatically whenever you switch your Omarchy theme (for
-  example, to Osaka Jade). Open the gear button to switch to a **Custom**
-  palette instead if you want the dock to look different from the rest of
-  the desktop.
-- **Customization** — the gear button's Settings tab covers which screen(s)
-  to show the dock on, which edge it lives on (bottom / top / left / right),
-  shape (Square / Rounded / Pill), an optional outline with adjustable
-  width, overall size, how far it sits from the screen edge (tracked
-  separately for auto-hide vs. always-visible, since a gap that looks right
-  floating just wastes space when the dock is pinned in place), and opacity.
-- **Auto-hide or always visible** — by default the dock stays out of the way
-  and only slides into view when you move the pointer to the screen edge it
-  lives on (macOS-style reveal). Switch to **Always visible** in the gear
-  popover to pin it in place permanently — like the top bar, it then
-  reserves that strip of the screen so windows tile around it instead of
-  overlapping it.
-- **Over fullscreen apps** — off by default (the dock disappears during
-  fullscreen, same as the top bar). Turn it on to have the dock reveal on
-  hover over a fullscreen window too, regardless of your visibility setting.
-
-## Usage
-
-- **Left click** — launch a pinned-but-closed app, activate/minimize a
-  single window, or cycle to the next window in a group.
-- **Middle click** — quit all of an app's windows.
-- **Right click** — pin/unpin, open a pinned-but-closed app, or quit.
-- **Hover** — see the app name, or the window list for a multi-window group.
-
-## Installation
+## Install
 
 ```sh
-omarchy plugin add <git-url-of-this-repo> --enable
+omarchy plugin add https://github.com/Silkvain/Dockseid.git --enable
 ```
 
-Or for local development, clone/symlink this folder into
-`~/.config/omarchy/plugins/<id>/` and run:
+For local development, link this folder to
+`~/.config/omarchy/plugins/io.github.silkvain.dockseid` and run:
 
 ```sh
 omarchy plugin enable io.github.silkvain.dockseid
 ```
 
-## Configuration
+## Features
 
-All settings (pinned apps, shape, opacity, theme mode, custom colors) are
-stored in `~/.local/state/dockseid/state.json` and edited through the dock's
-own gear-icon popover — there's nothing to hand-edit.
+**Apps**
+- Every running application gets an icon, with a small dot while it's open.
+- Pin apps to keep them in the dock: right-click an icon, or use the **Add App**
+  tab in the settings to search for one you haven't opened yet.
+- All windows of an app stack on a single icon. Click to cycle through them, or
+  hover to see the list and jump straight to one.
+- Drag icons to reorder them. The order is remembered.
+- Web apps (Discord, YouTube, WhatsApp and other browser app windows) group under
+  their own app icon instead of showing up as a separate one.
+- Omarchy's agent windows show the mark of the agent you picked in Omarchy
+  (Claude Code or Codex), and follow it if you change it. Other agents get a
+  terminal icon.
+- Hover labels are small speech bubbles. Browser windows show the site name, or
+  "New Window" when nothing is loaded.
+
+**Look**
+- Follows your active Omarchy theme, including the icon theme colour when you
+  switch themes.
+- **Glass** effect: a frosted, translucent dock over a blurred copy of your wallpaper.
+- Adjustable **opacity** and **background blur**. Blur shows through when opacity
+  is below 100%.
+- **Icon magnification**: icons grow under the cursor, macOS-style (optional).
+- Shape: Square, Rounded or Pill. Adjustable size and outline width.
+- **Background, outline and the Omarchy logo** can each be set to your own colour
+  with a colour wheel, independently. Anything you don't set follows the theme.
+- Sharp vector icons for many popular apps ship with the plugin. Other apps use
+  your system icon theme.
+
+**Behaviour**
+- **Auto-hide**: the dock slides in when you move the pointer to its screen edge.
+  Or **Always visible**, which reserves its own strip of the screen so windows
+  tile around it.
+- Put it on any edge (bottom, top, left, right) of one monitor or all of them.
+- **Over fullscreen apps**: keep the dock hidden, or reveal it on hover over a
+  fullscreen window.
+- **When workspace is empty**: with auto-hide, the dock can stay visible while
+  the workspace you're on has no windows.
+
+## Usage
+
+- **Left click**: launch a pinned app that isn't running, minimise or restore a
+  single window, or cycle to the next window of a group.
+- **Middle click**: close all of an app's windows.
+- **Right click**: keep in or remove from the dock, open, new window (for apps that
+  offer it), or quit.
+- **Hover**: the app name, or the list of windows for a group.
+- **Drag**: reorder icons.
+- **Omarchy logo button** (leftmost): opens the settings.
+
+## Settings
+
+Click the Omarchy logo on the dock. Everything is set there, so there are no files
+to edit. The **Settings** tab has three groups:
+
+- **Placement**: screen, position, visibility, when the workspace is empty,
+  edge offset, and behaviour over fullscreen apps.
+- **Appearance**: shape, size, icon magnification, glass, opacity, background
+  blur and the outline.
+- **Theme**: pick Background, Outline or Logo, then choose **System** or **Custom**
+  for it. A colour you picked is remembered if you switch back to System.
+
+Choosing **Glass** sets its own opacity, blur and outline, so those controls are
+greyed out while it's on.
+
+Your settings and pinned apps are stored in
+`~/.local/state/dockseid/state.json`.
+
+## Notes
+
+- Built for Omarchy on Hyprland. Workspace-based behaviour uses Hyprland's
+  workspace information.
+- The blur effect blurs your wallpaper, not the windows behind the dock.
+- Bundled icons: see [icons/README.md](icons/README.md) for the sources and
+  licences. App logos remain the property of their owners.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

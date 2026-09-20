@@ -34,9 +34,19 @@ PopupWindow {
 
   property string shape: "pill"
   property real opacityValue: 0.85
-  property string themeMode: "system"
+  property real blurValue: 0
+  property bool glass: false
+  property bool magnify: false
+  // Per color: follow the system theme (false) or use the user's own (true).
+  property bool useCustomBackground: false
+  property bool useCustomBorder: false
+  property bool useCustomLogo: false
   property string customBackground: "#1e1e2e"
-  property string customAccent: "#8aadf4"
+  property string customBorder: "#8aadf4"
+  property string customLogo: "#ffffff"
+  property string customTarget: "background" // which colour the System/Custom switch and wheel edit
+  readonly property bool targetCustom: customTarget === "background" ? useCustomBackground
+    : (customTarget === "border" ? useCustomBorder : useCustomLogo)
   property string monitor: "primary"
   // Named visibilityMode (not "visibility") because PopupWindow already has
   // its own inherited Qt Window.visibility property.
@@ -57,7 +67,10 @@ PopupWindow {
 
   signal shapePicked(string value)
   signal opacityPicked(real value)
-  signal themeModePicked(string value)
+  signal blurPicked(real value)
+  signal glassPicked(bool value)
+  signal magnifyPicked(bool value)
+  signal customEnabledPicked(string kind, bool on)
   signal customColorPicked(string kind, string hex)
   signal positionPicked(string value)
   signal monitorPicked(string value)
@@ -230,6 +243,50 @@ PopupWindow {
     }
   }
 
+  // Selector chip for the custom-color wheel: shows the color it currently
+  // holds, and highlights when it's the one being edited.
+  component ColorTarget: Rectangle {
+    id: target
+    property string kind: ""
+    property string label: ""
+    property color swatch: "transparent"
+    readonly property bool selected: popup.customTarget === target.kind
+    Layout.fillWidth: true
+    implicitHeight: Style.space(28)
+    radius: Style.space(6)
+    color: target.selected ? Util.alpha(Color.accent, 0.25) : Util.alpha(Color.popups.text, targetArea.containsMouse ? 0.1 : 0)
+
+    Row {
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      Rectangle {
+        width: Style.space(14)
+        height: width
+        radius: width / 2
+        anchors.verticalCenter: parent.verticalCenter
+        color: target.swatch
+        border.width: Math.max(1, Style.space(1))
+        border.color: Util.alpha(Color.popups.text, 0.4)
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: target.label
+        color: Color.popups.text
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+      }
+    }
+
+    MouseArea {
+      id: targetArea
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: popup.customTarget = target.kind
+    }
+  }
+
   component ModeButton: Rectangle {
     id: modeBtn
     property string value: ""
@@ -263,7 +320,9 @@ PopupWindow {
     id: card
     color: Color.popups.background
     borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(1)))
-    radius: Style.cornerRadius
+    // Follows the theme's rounding when it has some, but never square: the
+    // settings window gets at least a soft corner.
+    radius: Math.max(Style.cornerRadius, Style.space(14))
     // Wide enough for the Settings tab's two side-by-side columns; the
     // narrower Add App tab just sits centered within the same width.
     implicitWidth: Style.space(540)
@@ -314,6 +373,7 @@ PopupWindow {
 
         // ----- Placement: where and when the dock shows itself -----
         ColumnLayout {
+          id: leftColumn
           Layout.fillWidth: true
           Layout.alignment: Qt.AlignTop
           spacing: Style.space(10)
@@ -359,6 +419,32 @@ PopupWindow {
             ModeButton { value: "always"; label: "Always visible"; selected: popup.visibilityMode === "always"; onPicked: popup.visibilityPicked("always") }
           }
 
+          // Only meaningful with auto-hide (an always-visible dock never hides, so
+          // there is nothing to keep visible on an empty screen). Made invisible
+          // rather than removed, so the layout below doesn't shift or resize.
+          ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(10)
+            opacity: popup.visibilityMode === "autohide" ? 1 : 0
+            enabled: popup.visibilityMode === "autohide"
+
+            SectionLabel { text: "When Workspace Is Empty" }
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(6)
+              ModeButton {
+                value: "off"; label: "Hide as Usual"
+                selected: !popup.showWhenEmpty
+                onPicked: popup.showWhenEmptyPicked(false)
+              }
+              ModeButton {
+                value: "on"; label: "Stay Visible"
+                selected: popup.showWhenEmpty
+                onPicked: popup.showWhenEmptyPicked(true)
+              }
+            }
+          }
+
           // Tracked separately per visibility mode (see Dock.qml/DockSurface.qml)
           // so the label makes clear which one this slider is currently editing.
           SectionLabel {
@@ -397,25 +483,28 @@ PopupWindow {
             }
           }
 
-          SectionLabel { text: "When Screen Is Empty" }
-          RowLayout {
+          // Colour wheel for whichever colour is selected under Theme (right
+          // column). It sits here, in the space under Placement, rather than
+          // under the Theme switch: this column is shorter than the right one, so
+          // showing it never makes the window taller when a colour goes Custom.
+          ColumnLayout {
+            visible: popup.targetCustom
             Layout.fillWidth: true
             spacing: Style.space(6)
-            ModeButton {
-              value: "off"; label: "Auto-hide as Usual"
-              selected: !popup.showWhenEmpty
-              onPicked: popup.showWhenEmptyPicked(false)
-            }
-            ModeButton {
-              value: "on"; label: "Stay Visible"
-              selected: popup.showWhenEmpty
-              onPicked: popup.showWhenEmptyPicked(true)
+
+            SectionLabel { text: "Custom " + (popup.customTarget === "background" ? "background" : (popup.customTarget === "border" ? "outline" : "logo")) + " colour" }
+            ColorPicker {
+              Layout.fillWidth: true
+              value: popup.customTarget === "background" ? popup.customBackground
+                : (popup.customTarget === "border" ? popup.customBorder : popup.customLogo)
+              onPicked: function(hex) { popup.customColorPicked(popup.customTarget, hex) }
             }
           }
         }
 
         // ----- Right column: Appearance, then Theme, stacked -----
         ColumnLayout {
+          id: rightColumn
           Layout.fillWidth: true
           Layout.alignment: Qt.AlignTop
           spacing: Style.space(18)
@@ -456,48 +545,107 @@ PopupWindow {
             onReleased: function(v) { popup.sizePicked(v) }
           }
 
-          SectionLabel { text: "Opacity — " + Math.round(popup.opacityValue * 100) + "%" }
-          PanelSlider {
-            Layout.fillWidth: true
-            minimum: 0.35
-            maximum: 1.0
-            step: 0.05
-            value: popup.opacityValue
-            trackColor: Util.alpha(Color.popups.text, 0.15)
-            fillColor: Color.accent
-            knobColor: Color.accent
-            onMoved: function(v) { popup.opacityPicked(v) }
-          }
-
-          SectionLabel { text: "Outline" }
+          SectionLabel { text: "Icon Magnification" }
           RowLayout {
             Layout.fillWidth: true
             spacing: Style.space(6)
-            ModeButton { value: "on"; label: "Show"; selected: popup.borderEnabled; onPicked: popup.borderEnabledPicked(true) }
-            ModeButton { value: "off"; label: "Hide"; selected: !popup.borderEnabled; onPicked: popup.borderEnabledPicked(false) }
+            ModeButton { value: "off"; label: "Off"; selected: !popup.magnify; onPicked: popup.magnifyPicked(false) }
+            ModeButton { value: "on"; label: "On"; selected: popup.magnify; onPicked: popup.magnifyPicked(true) }
           }
 
-          ColumnLayout {
-            visible: popup.borderEnabled
+          SectionLabel { text: "Glass Effect" }
+          RowLayout {
             Layout.fillWidth: true
-            spacing: Style.space(4)
+            spacing: Style.space(6)
+            ModeButton { value: "off"; label: "Off"; selected: !popup.glass; onPicked: popup.glassPicked(false) }
+            ModeButton { value: "on"; label: "On"; selected: popup.glass; onPicked: popup.glassPicked(true) }
+          }
+          Text {
+            visible: popup.glass
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: "Glass sets its own opacity, blur and outline."
+            color: Color.popups.text
+            opacity: 0.6
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
 
-            SectionLabel { text: "Outline Width — " + Math.round(borderWidthSlider.liveValue) + "px" }
+          // Controls that glass overrides — dimmed and inert while it's on.
+          ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(10)
+            enabled: !popup.glass
+            opacity: popup.glass ? 0.35 : 1
+
+            SectionLabel { text: "Opacity — " + Math.round(popup.opacityValue * 100) + "%" }
             PanelSlider {
-              id: borderWidthSlider
               Layout.fillWidth: true
-              minimum: 1
-              maximum: 6
-              step: 1
-              integer: true
-              value: popup.borderWidth
+              minimum: 0.35
+              maximum: 1.0
+              step: 0.05
+              value: popup.opacityValue
               trackColor: Util.alpha(Color.popups.text, 0.15)
               fillColor: Color.accent
               knobColor: Color.accent
-              // Unlike size/edge offset this never resizes or moves the dock's
-              // window — border width is purely cosmetic — so it's safe to
-              // preview live on every drag tick like opacity.
-              onMoved: function(v) { popup.borderWidthPicked(v) }
+              onMoved: function(v) { popup.opacityPicked(v) }
+            }
+
+            SectionLabel { text: "Background blur — " + (popup.blurValue <= 0 ? "Off" : Math.round(popup.blurValue * 100) + "%") }
+            PanelSlider {
+              Layout.fillWidth: true
+              minimum: 0
+              maximum: 1.0
+              step: 0.05
+              value: popup.blurValue
+              trackColor: Util.alpha(Color.popups.text, 0.15)
+              fillColor: Color.accent
+              knobColor: Color.accent
+              onMoved: function(v) { popup.blurPicked(v) }
+            }
+            Text {
+              visible: popup.blurValue > 0 && popup.opacityValue > 0.9
+              Layout.fillWidth: true
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+              text: "Lower Opacity to see the blur through the dock."
+              color: Color.popups.text
+              opacity: 0.6
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            SectionLabel { text: "Outline" }
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(6)
+              ModeButton { value: "on"; label: "Show"; selected: popup.borderEnabled; onPicked: popup.borderEnabledPicked(true) }
+              ModeButton { value: "off"; label: "Hide"; selected: !popup.borderEnabled; onPicked: popup.borderEnabledPicked(false) }
+            }
+
+            ColumnLayout {
+              visible: popup.borderEnabled
+              Layout.fillWidth: true
+              spacing: Style.space(4)
+
+              SectionLabel { text: "Outline Width — " + Math.round(borderWidthSlider.liveValue) + "px" }
+              PanelSlider {
+                id: borderWidthSlider
+                Layout.fillWidth: true
+                minimum: 1
+                maximum: 6
+                step: 1
+                integer: true
+                value: popup.borderWidth
+                trackColor: Util.alpha(Color.popups.text, 0.15)
+                fillColor: Color.accent
+                knobColor: Color.accent
+                // Unlike size/edge offset this never resizes or moves the dock's
+                // window — border width is purely cosmetic — so it's safe to
+                // preview live on every drag tick like opacity.
+                onMoved: function(v) { popup.borderWidthPicked(v) }
+              }
             }
           }
         }
@@ -509,40 +657,31 @@ PopupWindow {
 
           GroupHeader { text: "Theme" }
 
+          Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: "Each colour follows your system theme unless you set it to Custom."
+            color: Color.popups.text
+            opacity: 0.6
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          // Which colour is being edited; each one is its own System/Custom choice.
           RowLayout {
             Layout.fillWidth: true
             spacing: Style.space(6)
-            ModeButton { value: "system"; label: "Match system theme"; selected: popup.themeMode === "system"; onPicked: popup.themeModePicked("system") }
-            ModeButton { value: "custom"; label: "Custom"; selected: popup.themeMode === "custom"; onPicked: popup.themeModePicked("custom") }
+            ColorTarget { kind: "background"; label: "Background"; swatch: popup.useCustomBackground ? popup.customBackground : Color.background }
+            ColorTarget { kind: "border"; label: "Outline"; swatch: popup.useCustomBorder ? popup.customBorder : Color.popups.border }
+            ColorTarget { kind: "logo"; label: "Logo"; swatch: popup.useCustomLogo ? popup.customLogo : Color.accent }
           }
 
-          ColumnLayout {
-            visible: popup.themeMode === "custom"
+          RowLayout {
             Layout.fillWidth: true
             spacing: Style.space(6)
-
-            RowLayout {
-              Layout.fillWidth: true
-              spacing: Style.space(8)
-              SectionLabel { text: "Background"; Layout.preferredWidth: Style.space(84) }
-              TextField {
-                id: bgField
-                Layout.fillWidth: true
-                text: popup.customBackground
-                onEditingFinished: popup.customColorPicked("background", text)
-              }
-            }
-            RowLayout {
-              Layout.fillWidth: true
-              spacing: Style.space(8)
-              SectionLabel { text: "Accent"; Layout.preferredWidth: Style.space(84) }
-              TextField {
-                id: accentField
-                Layout.fillWidth: true
-                text: popup.customAccent
-                onEditingFinished: popup.customColorPicked("accent", text)
-              }
-            }
+            ModeButton { value: "system"; label: "System"; selected: !popup.targetCustom; onPicked: popup.customEnabledPicked(popup.customTarget, false) }
+            ModeButton { value: "custom"; label: "Custom"; selected: popup.targetCustom; onPicked: popup.customEnabledPicked(popup.customTarget, true) }
           }
         }
         } // end right column

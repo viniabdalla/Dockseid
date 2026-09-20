@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Shapes
 import Quickshell
 import qs.Commons
 import qs.Ui
@@ -36,6 +37,15 @@ PopupWindow {
   readonly property int instanceCount: toplevels.length
   readonly property bool multiInstance: instanceCount > 1
 
+  // Browser / web-app windows get a short site label ("apple.com", or "New
+  // Window" when empty) instead of their full page title or URL.
+  function windowLabel(t) {
+    if (DockModel.isBrowserWindow(t.appId)) return DockModel.shortWindowLabel(t.title)
+    return t.title || t.appId || ""
+  }
+  readonly property string singleLabel: (instanceCount === 1 && DockModel.isBrowserWindow(toplevels[0].appId))
+    ? DockModel.shortWindowLabel(toplevels[0].title) : appName
+
   color: "transparent"
   visible: false
   implicitWidth: Math.ceil(card.implicitWidth)
@@ -52,38 +62,70 @@ PopupWindow {
     onAnchoring: {
       if (!popup.anchorItem || !popup.dockWindow) return
       var off = DockModel.anchorOffset(popup.dockPosition, popup.anchorItem.width, popup.anchorItem.height,
-        popup.implicitWidth, popup.implicitHeight, Style.space(8))
+        popup.implicitWidth, popup.implicitHeight, Style.space(4))
       var local = popup.dockWindow.contentItem.mapFromItem(popup.anchorItem, off.x, off.y)
       anchor.rect.x = Math.round(popup.originX + local.x)
       anchor.rect.y = Math.round(popup.originY + local.y)
     }
   }
 
-  BorderSurface {
+  // macOS-style speech bubble: a pill (a rounded rectangle for the taller
+  // window list) with a small tail on the side facing the dock, so it reads as
+  // pointing at the icon. The popup's own size includes the tail, which is why
+  // the anchor gap above is small.
+  Item {
     id: card
-    color: Color.tooltip.background
-    borderSpec: Border.surfaceSpec("tooltip", "border", Color.tooltip.border, Math.max(1, Style.space(1)))
-    radius: Style.cornerRadius
-    implicitWidth: Math.max(nameLabel.implicitWidth, popup.multiInstance ? instanceColumn.implicitWidth : 0) + Style.space(20)
-    implicitHeight: (popup.multiInstance ? instanceColumn.implicitHeight + nameLabel.implicitHeight + Style.space(6) : nameLabel.implicitHeight) + Style.space(16)
+
+    readonly property string tailSide: popup.dockPosition   // dock edge == side the tail points to
+    readonly property bool tailOnSides: tailSide === "left" || tailSide === "right"
+    readonly property real tailW: Style.space(14)
+    readonly property real tailH: Style.space(7)
+    readonly property real hPad: popup.multiInstance ? Style.space(10) : Style.space(16)
+    readonly property real vPad: Style.space(8)
+    readonly property real bodyW: content.implicitWidth + hPad * 2
+    readonly property real bodyH: content.implicitHeight + vPad * 2
+    readonly property real bodyX: tailSide === "left" ? tailH : 0
+    readonly property real bodyY: tailSide === "top" ? tailH : 0
+
+    implicitWidth: bodyW + (tailOnSides ? tailH : 0)
+    implicitHeight: bodyH + (tailOnSides ? 0 : tailH)
 
     HoverHandler {
       onHoveredChanged: popup.hovered = hovered
     }
 
-    ColumnLayout {
+    Shape {
       anchors.fill: parent
-      anchors.margins: Style.space(10)
+      layer.enabled: true
+      layer.samples: 4
+
+      ShapePath {
+        fillColor: Color.tooltip.background
+        strokeColor: "transparent"
+        strokeWidth: -1 // never an outline; the bubble is just its fill
+
+        PathSvg {
+          path: DockModel.bubblePath(card.bodyX, card.bodyY, card.bodyW, card.bodyH,
+            Math.min(card.bodyH / 2, Style.space(18)), card.tailW, card.tailH, card.tailSide)
+        }
+      }
+    }
+
+    ColumnLayout {
+      id: content
+      x: card.bodyX + card.hPad
+      y: card.bodyY + card.vPad
+      width: implicitWidth
       spacing: Style.space(6)
 
       Text {
         id: nameLabel
+        visible: !popup.multiInstance
         textFormat: Text.PlainText
-        text: popup.multiInstance ? (popup.appName + " — " + popup.instanceCount + " windows") : popup.appName
+        text: popup.singleLabel
         color: Color.tooltip.text
         font.family: Style.font.family
         font.pixelSize: Style.font.body
-        font.bold: popup.multiInstance
       }
 
       ColumnLayout {
@@ -113,7 +155,7 @@ PopupWindow {
               anchors.rightMargin: Style.space(6)
               textFormat: Text.PlainText
               elide: Text.ElideRight
-              text: (row.modelData.title || row.modelData.appId || "")
+              text: popup.windowLabel(row.modelData)
               color: Color.tooltip.text
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
