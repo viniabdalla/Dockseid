@@ -190,11 +190,11 @@ Item {
   }
 
   function closePopups() {
-    surface.openPopupKind = ""
-    surface.openPopupItem = null
     hoverPopup.visible = false
     contextMenu.visible = false
     settingsPopup.visible = false
+    surface.openPopupKind = ""
+    surface.openPopupItem = null
   }
 
   function showHover(iconItem, item) {
@@ -253,7 +253,7 @@ Item {
     settingsPopup.customLogo = st.customLogo !== "" ? st.customLogo : String(controller.dockAccent)
   }
 
-  function showSettings() {
+  function showSettings(topBarAnchor) {
     surface.closePopups()
     surface.openPopupKind = "settings"
     // Centers on the whole pill rather than just the gear button (which
@@ -276,9 +276,31 @@ Item {
     settingsPopup.showWhenEmpty = surface.settings.showWhenEmpty
     settingsPopup.monitorOptions = controller.monitorOptions
     settingsPopup.dockPosition = surface.position
+    settingsPopup.topBarAnchor = !!topBarAnchor
     settingsPopup.activeTab = 0
     settingsPopup.visible = true
   }
+
+  function openSettingsFromExternal() {
+    surface.revealed = true
+    surface.showSettings(true)
+  }
+
+  function toggleSettingsFromExternal() {
+    if (surface.openPopupKind === "settings") {
+      surface.closePopups()
+      return
+    }
+    surface.openSettingsFromExternal()
+  }
+
+  function openOmarchyMenu() {
+    surface.closePopups()
+    Quickshell.execDetached(["omarchy-shell", "shell", "toggle", "omarchy.menu", "{\"menu\":\"root\"}"])
+  }
+
+  Component.onCompleted: controller.registerSurface(surface)
+  Component.onDestruction: controller.unregisterSurface(surface)
 
   // --------------------------------------------------------- drag reorder
   // Per-icon footprint along the dock's primary axis. Must track
@@ -395,6 +417,7 @@ Item {
     WlrLayershell.layer: surface.fullscreenOverride ? WlrLayer.Overlay : WlrLayer.Top
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: surface.effectiveAlwaysVisible ? ExclusionMode.Auto : ExclusionMode.Ignore
+    mask: Region { item: pill }
 
     anchors {
       top: surface.position === "top"
@@ -607,7 +630,7 @@ Item {
           diameter: Math.round(Style.space(42) * surface.settings.size)
           sizeScale: surface.settings.size
           Layout.alignment: Qt.AlignCenter
-          onClicked: surface.showSettings()
+          onClicked: surface.openOmarchyMenu()
         }
 
         Rectangle {
@@ -685,14 +708,14 @@ Item {
   // already-mapped xdg_popup every time dockWindow itself resizes or moves —
   // that live reposition of the actual host surface is what left the
   // rendering artifact, independent of where within it the popup targets.
-  // This window spans the whole screen, is fully click-through (empty
-  // mask, matching the bar's drag-ghost windows), and never changes size
-  // with dock settings, so popups anchor here instead and can freely track
-  // the pill without ever perturbing the surface they're attached to.
+  // This window spans the whole screen while a popup is open, then unmaps
+  // completely. Leaving it mapped with an empty mask can still block input
+  // behind the dock on some compositor/Quickshell versions, so idle dock
+  // state should leave only the real dock and trigger surfaces behind.
   PanelWindow {
     id: popupAnchor
     screen: surface.screen
-    visible: true
+    visible: surface.openPopupKind !== ""
     color: "transparent"
 
     WlrLayershell.namespace: "dockseid-popup-anchor"

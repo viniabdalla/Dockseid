@@ -21,6 +21,7 @@ Item {
   property var iconOrder: []
   property var settings: DockModel.defaultSettings()
   property bool stateLoaded: false
+  property var surfaceItems: []
 
   // -------------------------------------------------------------- state io
   function persist() {
@@ -40,6 +41,54 @@ Item {
     root.settings = state.settings
     root.stateLoaded = true
     root.rebuildItems()
+  }
+
+  function registerSurface(surface) {
+    var next = root.surfaceItems.slice()
+    if (next.indexOf(surface) < 0) next.push(surface)
+    root.surfaceItems = next
+  }
+
+  function unregisterSurface(surface) {
+    var next = root.surfaceItems.slice()
+    var idx = next.indexOf(surface)
+    if (idx >= 0) next.splice(idx, 1)
+    root.surfaceItems = next
+  }
+
+  function surfaceForScreen(screenName) {
+    var wanted = String(screenName || "")
+    if (wanted.length > 0) {
+      for (var i = 0; i < root.surfaceItems.length; i++) {
+        var surface = root.surfaceItems[i]
+        if (surface && surface.screen && String(surface.screen.name || "") === wanted)
+          return surface
+      }
+    }
+    return root.surfaceItems.length > 0 ? root.surfaceItems[0] : null
+  }
+
+  function openSettings(screenName) {
+    var surface = root.surfaceForScreen(screenName)
+    if (!surface) return false
+    surface.openSettingsFromExternal()
+    return true
+  }
+
+  function toggleSettings(screenName) {
+    var surface = root.surfaceForScreen(screenName)
+    if (!surface) return false
+    surface.toggleSettingsFromExternal()
+    return true
+  }
+
+  IpcHandler {
+    target: "io.github.silkvain.dockseid"
+    function openSettings(): string { return root.openSettings() ? "ok" : "unknown" }
+    function toggleSettings(): string { return root.toggleSettings() ? "ok" : "unknown" }
+    function openSettingsOn(screenName: string): string { return root.openSettings(screenName) ? "ok" : "unknown" }
+    function toggleSettingsOn(screenName: string): string { return root.toggleSettings(screenName) ? "ok" : "unknown" }
+    function settings(): string { return root.openSettings() ? "ok" : "unknown" }
   }
 
   Process {
@@ -549,7 +598,7 @@ Item {
   // maps to, but the corner radius always derives from it so the pill reads
   // as a stadium shape either way.
   readonly property real thickness: Math.round(Style.space(60) * root.settings.size)
-  readonly property real dockRadius: root.settings.shape === "square" ? Style.space(10)
+  readonly property real dockRadius: root.settings.shape === "square" ? 0
     : (root.settings.shape === "rounded" ? root.thickness / 4 : root.thickness / 2)
 
   readonly property var addAppEntries: {

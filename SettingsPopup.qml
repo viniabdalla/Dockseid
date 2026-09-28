@@ -30,6 +30,7 @@ PopupWindow {
   property real originY: 0
   property Item anchorItem: null
   property string dockPosition: "bottom"
+  property bool topBarAnchor: false
   property int activeTab: 0 // 0 = Settings, 1 = Add App
 
   property string shape: "pill"
@@ -140,6 +141,11 @@ PopupWindow {
     rect.height: 1
 
     onAnchoring: {
+      if (popup.topBarAnchor && popup.hostWindow) {
+        anchor.rect.x = Math.round((popup.hostWindow.width - popup.implicitWidth) / 2)
+        anchor.rect.y = Style.space(34)
+        return
+      }
       if (!popup.anchorItem || !popup.dockWindow) return
       var off = DockModel.anchorOffset(popup.dockPosition, popup.anchorItem.width, popup.anchorItem.height,
         popup.implicitWidth, popup.implicitHeight, Style.space(8))
@@ -181,7 +187,7 @@ PopupWindow {
     signal picked()
     Layout.fillWidth: true
     implicitHeight: Style.space(30)
-    radius: shapeBtn.value === "pill" ? height / 2 : (shapeBtn.value === "rounded" ? Style.space(8) : Style.space(3))
+    radius: shapeBtn.value === "pill" ? height / 2 : (shapeBtn.value === "rounded" ? Style.space(8) : 0)
     color: shapeBtn.selected ? Util.alpha(Color.accent, 0.25) : Util.alpha(Color.popups.text, shapeArea.containsMouse ? 0.1 : 0)
     border.width: shapeBtn.selected ? Math.max(1, Style.space(1)) : 0
     border.color: Color.accent
@@ -320,9 +326,7 @@ PopupWindow {
     id: card
     color: Color.popups.background
     borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(1)))
-    // Follows the theme's rounding when it has some, but never square: the
-    // settings window gets at least a soft corner.
-    radius: Math.max(Style.cornerRadius, Style.space(14))
+    radius: popup.shape === "square" ? 0 : Math.max(Style.cornerRadius, Style.space(14))
     // Wide enough for the Settings tab's two side-by-side columns; the
     // narrower Add App tab just sits centered within the same width.
     implicitWidth: Style.space(540)
